@@ -1,0 +1,32 @@
+{
+  "name": "luma-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "db:migrate": "bun run scripts/migrate.ts",
+    "db:seed-admin": "bun run scripts/seed-admin.ts",
+    "worker": "bun run scripts/worker.ts"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-node": "latest",
+    "@sveltejs/kit": "latest",
+    "@sveltejs/vite-plugin-svelte": "latest",
+    "@tailwindcss/vite": "latest",
+    "lucide-svelte": "latest",
+    "postgres": "latest",
+    "svelte": "latest",
+    "tailwindcss": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "svelte-check": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}
