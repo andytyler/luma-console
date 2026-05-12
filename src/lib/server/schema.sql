@@ -203,3 +203,23 @@ create table if not exists luma_sync_runs (
   started_at timestamptz not null default now(),
   finished_at timestamptz
 );
+
+create table if not exists luma_webhook_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  delivery_id text not null unique,
+  event_type text,
+  luma_event_id text,
+  luma_guest_id text,
+  signature_valid boolean not null default false,
+  status text not null check (status in ('received', 'processed', 'ignored', 'failed')) default 'received',
+  error text,
+  payload jsonb not null,
+  received_at timestamptz not null default now(),
+  processed_at timestamptz
+);
+
+create index if not exists luma_webhook_deliveries_event_idx
+  on luma_webhook_deliveries(luma_event_id, received_at desc);
+
+create index if not exists luma_webhook_deliveries_received_idx
+  on luma_webhook_deliveries(received_at desc);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
-  import { LogOut, Settings, UsersRound } from 'lucide-svelte';
+  import { LogOut, Settings, UsersRound } from '@lucide/svelte';
+  import { Button } from '$lib/components/ui/button/index.js';
 
   let { data, children } = $props();
 </script>
@@ -14,16 +15,16 @@
           <span>Luma Console</span>
         </a>
         <nav class="flex items-center gap-1 text-sm">
-          <a class="rounded px-3 py-2 text-neutral-700 hover:bg-neutral-100" href="/events">
-            <UsersRound class="mr-1 inline size-4" /> Events
-          </a>
-          <a class="rounded px-3 py-2 text-neutral-700 hover:bg-neutral-100" href="/settings/invites">
-            <Settings class="mr-1 inline size-4" /> Invites
-          </a>
+          <Button variant="ghost" size="sm" href="/events">
+            <UsersRound data-icon="inline-start" /> Events
+          </Button>
+          <Button variant="ghost" size="sm" href="/settings/invites">
+            <Settings data-icon="inline-start" /> Invites
+          </Button>
           <form method="POST" action="/logout">
-            <button class="rounded px-3 py-2 text-neutral-700 hover:bg-neutral-100">
-              <LogOut class="mr-1 inline size-4" /> Sign out
-            </button>
+            <Button variant="ghost" size="sm">
+              <LogOut data-icon="inline-start" /> Sign out
+            </Button>
           </form>
         </nav>
       </div>
