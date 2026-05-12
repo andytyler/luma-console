@@ -4,6 +4,7 @@ const LUMA_BASE_URL = 'https://public-api.luma.com';
 const PAGE_LIMIT = 50;
 
 type Json = Record<string, unknown>;
+type ParamValue = string | number | boolean | Array<string | number | boolean> | undefined;
 
 export class LumaError extends Error {
   constructor(
@@ -19,9 +20,13 @@ function apiKey() {
   return requireEnv('LUMA_API_KEY');
 }
 
-function appendParams(url: URL, params: Record<string, string | number | undefined>) {
+function appendParams(url: URL, params: Record<string, ParamValue>) {
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        url.searchParams.append(key, String(item));
+      }
+    } else if (value !== undefined && value !== '') {
       url.searchParams.set(key, String(value));
     }
   }
@@ -37,7 +42,7 @@ async function parseResponse(response: Response) {
   }
 }
 
-export async function lumaGet(path: string, params: Record<string, string | number | undefined> = {}) {
+export async function lumaGet(path: string, params: Record<string, ParamValue> = {}) {
   const url = new URL(path, LUMA_BASE_URL);
   appendParams(url, params);
 
@@ -108,7 +113,7 @@ function nextCursor(payload: Json) {
   return String(payload.next_cursor ?? payload.nextCursor ?? payload.pagination_cursor ?? '');
 }
 
-async function paginated(path: string, params: Record<string, string | number | undefined>) {
+async function paginated(path: string, params: Record<string, ParamValue>) {
   const all: Json[] = [];
   let cursor = '';
 
@@ -134,10 +139,37 @@ export function unwrapGuest(entry: Json) {
   return ((entry.guest as Json | undefined) ?? entry) as Json;
 }
 
+function eventIdentity(entry: Json) {
+  const event = unwrapEvent(entry);
+  return String(event.id ?? event.event_id ?? event.api_id ?? event.event_api_id ?? JSON.stringify(entry));
+}
+
 export async function listCalendarEvents() {
-  return paginated('/v1/calendar/list-events', {
-    sort_column: 'start_at',
-    sort_direction: 'desc'
+  const batches = await Promise.all([
+    paginated('/v1/calendar/list-events', {
+      sort_column: 'start_at',
+      sort_direction: 'desc',
+      platforms: ['luma', 'external'],
+      status: 'approved'
+    }),
+    paginated('/v1/calendar/list-events', {
+      sort_column: 'start_at',
+      sort_direction: 'desc',
+      platforms: ['luma', 'external'],
+      status: 'pending'
+    })
+  ]);
+
+  const byId = new Map<string, Json>();
+  for (const event of batches.flat()) {
+    byId.set(eventIdentity(event), event);
+  }
+  return [...byId.values()];
+}
+
+export async function getEvent(eventId: string) {
+  return lumaGet('/v1/event/get', {
+    id: eventId
   });
 }
 

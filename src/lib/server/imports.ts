@@ -1,9 +1,27 @@
 import { jsonb, sql } from './db';
-import { getEventGuest, listCalendarEvents, listEventGuests } from './luma';
+import { getEvent, getEventGuest, listCalendarEvents, listEventGuests, unwrapEvent } from './luma';
 import { normalizeEvent, normalizeGuest } from './luma-normalize';
 import { enqueueScoreJobs } from './jobs';
 
 type Json = Record<string, unknown>;
+
+function asObject(value: unknown): Json {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
+}
+
+function mergeEventPayload(listEntry: Json, detailResponse: Json) {
+  const listEvent = asObject(unwrapEvent(listEntry));
+  const detailEvent = asObject(unwrapEvent(detailResponse));
+
+  return {
+    ...listEvent,
+    ...detailEvent,
+    _luma: {
+      list_entry: listEntry,
+      detail_response: detailResponse
+    }
+  };
+}
 
 export async function upsertEventFromRaw(raw: Json) {
   const event = normalizeEvent(raw);
@@ -169,7 +187,24 @@ export async function syncEventsFromLuma() {
     let imported = 0;
 
     for (const raw of rawEvents) {
-      const savedEvent = await upsertEventFromRaw(raw);
+      const listedEvent = normalizeEvent(raw);
+      if (!listedEvent) continue;
+
+      let eventRaw = raw;
+      try {
+        const detail = await getEvent(listedEvent.lumaEventId);
+        eventRaw = mergeEventPayload(raw, detail);
+      } catch (error) {
+        eventRaw = {
+          ...asObject(unwrapEvent(raw)),
+          _luma: {
+            list_entry: raw,
+            detail_fetch_error: error instanceof Error ? error.message : String(error)
+          }
+        };
+      }
+
+      const savedEvent = await upsertEventFromRaw(eventRaw);
       if (savedEvent) imported += 1;
     }
 

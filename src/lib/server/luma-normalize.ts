@@ -24,6 +24,56 @@ function nested(source: Json, path: string) {
   return current;
 }
 
+function url(value: unknown) {
+  const result = text(value);
+  return result && /^https?:\/\//.test(result) ? result : null;
+}
+
+function firstUrl(...values: unknown[]) {
+  for (const value of values) {
+    const result = url(value);
+    if (result) return result;
+  }
+  return null;
+}
+
+function findCoverUrl(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = findCoverUrl(item);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  const object = value as Json;
+  for (const [key, child] of Object.entries(object)) {
+    const lowerKey = key.toLowerCase();
+    const isImageKey =
+      lowerKey.includes('cover') ||
+      lowerKey.includes('image') ||
+      lowerKey.includes('thumbnail') ||
+      lowerKey.includes('photo');
+
+    if (isImageKey) {
+      const direct = firstUrl(
+        child,
+        nested(child as Json, 'url'),
+        nested(child as Json, 'image.url'),
+        nested(child as Json, 'original.url')
+      );
+      if (direct) return direct;
+
+      const nestedResult = findCoverUrl(child);
+      if (nestedResult) return nestedResult;
+    }
+  }
+
+  return null;
+}
+
 export function normalizeEvent(raw: Json) {
   const event = ((raw.event as Json | undefined) ?? (raw.data as Json | undefined) ?? raw) as Json;
   const id = firstText(
@@ -41,7 +91,18 @@ export function normalizeEvent(raw: Json) {
     apiId: firstText(event.api_id, event.event_api_id),
     name: firstText(event.name, event.title) ?? 'Untitled event',
     url: firstText(event.url, event.event_url, event.luma_url),
-    coverUrl: firstText(event.cover_url, nested(event, 'cover.url')),
+    coverUrl:
+      firstUrl(
+        event.cover_url,
+        event.coverUrl,
+        event.social_image_url,
+        event.thumbnail_url,
+        nested(event, 'cover.url'),
+        nested(event, 'cover.image.url'),
+        nested(event, 'image.url'),
+        nested(event, 'images.cover.url'),
+        nested(event, 'calendar.cover_url')
+      ) ?? findCoverUrl(event),
     startAt: firstText(event.start_at, event.startAt),
     endAt: firstText(event.end_at, event.endAt),
     timezone: firstText(event.timezone, event.tz),

@@ -12,24 +12,34 @@ export const load: PageServerLoad = async () => {
       luma_event_id: string;
       name: string;
       url: string | null;
+      cover_url: string | null;
       start_at: string | null;
+      end_at: string | null;
+      timezone: string | null;
+      status: string | null;
       guest_count: number;
       pending_count: number;
       approved_count: number;
       waitlist_count: number;
       last_synced_at: string | null;
+      raw_json: Record<string, unknown>;
     }[]>`
       select
         id::text,
         luma_event_id,
         name,
         url,
+        cover_url,
         start_at::text,
+        end_at::text,
+        timezone,
+        status,
         guest_count,
         pending_count,
         approved_count,
         waitlist_count,
-        last_synced_at::text
+        last_synced_at::text,
+        raw_json
       from events
       order by start_at desc nulls last
     `,
