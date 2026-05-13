@@ -9,7 +9,8 @@ Stack:
 - Tailwind v4 + shadcn-svelte
 - Bun runtime
 - Postgres with raw SQL, no ORM
-- Cookie sessions and invite links
+- Supabase Google OAuth, with legacy cookie login only when Supabase is not configured
+- Calendar-scoped permissions and invite records
 - GitHub GraphQL enrichment
 - BrightData LinkedIn profile enrichment
 
@@ -23,18 +24,47 @@ bun run db:migrate
 bun run dev
 ```
 
+Tests:
+
+```bash
+bun run test
+```
+
+Tests preload `tests/setup.ts`, which blocks unstubbed external network calls and resets provider env vars to safe test values. Luma, GitHub, BrightData, Supabase, Google, and Resend behavior must be mocked in tests.
+
 First login:
 
-1. Set `ADMIN_EMAILS` to your email.
-2. Visit `/login`.
-3. Use that email and a 12+ character password to create the first admin.
+1. For local legacy mode, set `ADMIN_EMAILS`, visit `/login`, and create a password account.
+2. For production, set Supabase env vars and use Google OAuth only.
+3. After sign-in, visit `/onboarding` and connect a Luma calendar API key.
+
+Google OAuth:
+
+1. Create a Supabase project.
+2. Enable Google provider in Supabase Auth.
+3. Add redirect URL: `https://YOUR_DOMAIN/auth/callback`.
+4. Set `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+5. Set `APP_ENCRYPTION_KEY` to a long random secret for hosted production. Local dev auto-generates `.local/app-encryption-key`.
 
 Railway:
 
 1. Add a Railway Postgres database.
-2. Set `DATABASE_URL`, `ADMIN_EMAILS`, and `LUMA_API_KEY`.
+2. Set `DATABASE_URL`, `APP_ENCRYPTION_KEY` for hosted production, Supabase env vars, and optional enrichment keys.
 3. Deploy the web service with the included `railway.toml`.
 4. Add a separate Railway worker service with start command `bun run worker` if you want continuous enrichment.
+
+Calendar onboarding:
+
+- Each user signs in with Google.
+- Each connected Luma calendar stores its API key encrypted in Postgres.
+- Events and guests are scoped to `calendar_memberships`.
+- Existing local data is migrated into a legacy local calendar.
+
+Invite sending:
+
+- Calendar admins can import people from Luma calendar metadata and click `Send invites`.
+- Real emails require `INVITE_EMAILS_ENABLED=true`, `RESEND_API_KEY`, and `INVITE_EMAIL_FROM`.
+- With `INVITE_EMAILS_ENABLED=false`, invite rows are created as dry-runs and no emails are sent.
 
 Luma webhook:
 
@@ -51,7 +81,7 @@ Luma write safety:
 - The app reads Luma events and guests with GET requests.
 - Luma guest status changes are isolated in `src/lib/server/luma.ts`.
 - Batch actions default to dry-run.
-- Real Luma writes require both `LUMA_WRITES_ENABLED=true` and confirmation text `APPLY`.
+- Real Luma writes require enabling the Setup page write toggle and confirmation text `APPLY`.
 
 Postgres persistence:
 

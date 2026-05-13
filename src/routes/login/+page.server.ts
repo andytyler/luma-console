@@ -7,7 +7,8 @@ import {
   sessionCookieName,
   sessionCookieOptions
 } from '$lib/server/auth';
-import { adminEmails } from '$lib/server/env';
+import { adminEmails, supabaseConfigured } from '$lib/server/env';
+import { createSupabaseServerClient } from '$lib/server/supabase';
 import type { PageServerLoad } from './$types';
 
 function safeNext(value: string | null) {
@@ -19,12 +20,30 @@ export const load: PageServerLoad = async ({ url }) => {
   const userCount = await countUsers();
   return {
     setupMode: userCount === 0,
+    supabaseConfigured: supabaseConfigured(),
     next: safeNext(url.searchParams.get('next')),
     adminEmails: adminEmails()
   };
 };
 
 export const actions: Actions = {
+  google: async (event) => {
+    const form = await event.request.formData();
+    const next = safeNext(String(form.get('next') ?? event.url.searchParams.get('next') ?? '/events'));
+    const supabase = createSupabaseServerClient(event);
+    if (!supabase) return fail(500, { message: 'Supabase is not configured.' });
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${event.url.origin}/auth/callback?next=${encodeURIComponent(next)}`
+      }
+    });
+    if (error || !data.url) {
+      return fail(500, { message: error?.message ?? 'Could not start Google sign-in.' });
+    }
+    throw redirect(303, data.url);
+  },
   default: async ({ request, cookies, url }) => {
     const form = await request.formData();
     const email = String(form.get('email') ?? '').trim().toLowerCase();

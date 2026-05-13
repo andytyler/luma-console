@@ -1,5 +1,6 @@
 export function csvEscape(value: unknown) {
-  const text = value === null || value === undefined ? '' : String(value);
+  const raw = value === null || value === undefined ? '' : String(value);
+  const text = /^[=+\-@\t\r]/.test(raw.trimStart()) ? `'${raw}` : raw;
   if (!/[",\n\r]/.test(text)) return text;
   return `"${text.replaceAll('"', '""')}"`;
 }

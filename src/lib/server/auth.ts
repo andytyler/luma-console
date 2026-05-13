@@ -1,5 +1,8 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { sql } from './db';
+import { adminEmails } from './env';
+import { acceptPendingCalendarInvites } from './calendars';
 
 const SESSION_DAYS = 14;
 export const sessionCookieName = 'luma_session';
@@ -9,6 +12,8 @@ export type User = {
   id: string;
   email: string;
   role: UserRole;
+  name?: string | null;
+  avatar_url?: string | null;
 };
 
 function base64url(buffer: Buffer) {
@@ -66,6 +71,41 @@ export async function createUser(email: string, password: string, role: UserRole
     values (${email.toLowerCase()}, ${passwordHash}, ${role})
     returning id::text, email, role
   `;
+  return user;
+}
+
+export async function upsertSupabaseUser(supabaseUser: SupabaseUser) {
+  const email = supabaseUser.email?.toLowerCase();
+  if (!email) return null;
+
+  const metadata = supabaseUser.user_metadata ?? {};
+  const name =
+    typeof metadata.full_name === 'string'
+      ? metadata.full_name
+      : typeof metadata.name === 'string'
+        ? metadata.name
+        : null;
+  const avatar =
+    typeof metadata.avatar_url === 'string'
+      ? metadata.avatar_url
+      : typeof metadata.picture === 'string'
+        ? metadata.picture
+        : null;
+  const role: UserRole = adminEmails().includes(email) ? 'admin' : 'reviewer';
+
+  const [user] = await sql<User[]>`
+    insert into users (supabase_user_id, email, name, avatar_url, role)
+    values (${supabaseUser.id}, ${email}, ${name}, ${avatar}, ${role})
+    on conflict (email) do update set
+      supabase_user_id = coalesce(users.supabase_user_id, excluded.supabase_user_id),
+      name = excluded.name,
+      avatar_url = excluded.avatar_url,
+      role = case when users.role = 'admin' then users.role else excluded.role end,
+      updated_at = now()
+    returning id::text, email, role, name, avatar_url
+  `;
+
+  await acceptPendingCalendarInvites(user.id, email);
   return user;
 }
 

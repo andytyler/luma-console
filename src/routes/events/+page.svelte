@@ -55,12 +55,23 @@
       <p class="mt-1 text-sm text-muted-foreground">Pull every managed Luma event, then import each guest list.</p>
     </div>
     <div class="flex flex-wrap gap-2">
+      {#if data.calendars.length > 1}
+        <form method="GET">
+          <select class="h-9 rounded-md border bg-background px-2 text-sm" name="calendar_id" onchange={(event) => event.currentTarget.form?.submit()}>
+            {#each data.calendars as calendar}
+              <option value={calendar.id} selected={data.selectedCalendarId === calendar.id}>{calendar.name}</option>
+            {/each}
+          </select>
+        </form>
+      {/if}
       <form method="POST" action="?/sync">
+        <input type="hidden" name="calendar_id" value={data.selectedCalendarId ?? ''} />
         <Button type="submit" disabled={!data.lumaConfigured}>
           <CalendarSync data-icon="inline-start" /> Sync Luma events
         </Button>
       </form>
       <form method="POST" action="?/syncAllGuests">
+        <input type="hidden" name="calendar_id" value={data.selectedCalendarId ?? ''} />
         <Button type="submit" variant="outline" disabled={!data.lumaConfigured}>
           <UsersRound data-icon="inline-start" /> Sync all guest lists
         </Button>

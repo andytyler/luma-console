@@ -27,7 +27,8 @@
     <div class="flex flex-col gap-[2px]">
       {#each (week.contributionDays ?? []) as day}
         <span
-          class={`size-[5px] rounded-[1px] ${intensity(Number(day.contributionCount ?? 0))}`}
+          class={`size-[5px] rounded-[1px] ${day.color ? '' : intensity(Number(day.contributionCount ?? 0))}`}
+          style:background-color={day.color || undefined}
           title={`${day.date}: ${day.contributionCount} contributions`}
         ></span>
       {/each}

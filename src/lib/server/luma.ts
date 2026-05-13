@@ -1,10 +1,11 @@
-import { env, lumaWritesEnabled, requireEnv } from './env';
+import { env, requireEnv } from './env';
 
 const LUMA_BASE_URL = 'https://public-api.luma.com';
 const PAGE_LIMIT = 50;
 
 type Json = Record<string, unknown>;
 type ParamValue = string | number | boolean | Array<string | number | boolean> | undefined;
+type LumaOptions = { apiKey?: string };
 
 export class LumaError extends Error {
   constructor(
@@ -16,8 +17,8 @@ export class LumaError extends Error {
   }
 }
 
-function apiKey() {
-  return requireEnv('LUMA_API_KEY');
+function apiKey(options: LumaOptions = {}) {
+  return options.apiKey || requireEnv('LUMA_API_KEY');
 }
 
 function appendParams(url: URL, params: Record<string, ParamValue>) {
@@ -42,14 +43,18 @@ async function parseResponse(response: Response) {
   }
 }
 
-export async function lumaGet(path: string, params: Record<string, ParamValue> = {}) {
+export async function lumaGet(
+  path: string,
+  params: Record<string, ParamValue> = {},
+  options: LumaOptions = {}
+) {
   const url = new URL(path, LUMA_BASE_URL);
   appendParams(url, params);
 
   const response = await fetch(url, {
     method: 'GET',
     headers: {
-      'x-luma-api-key': apiKey(),
+      'x-luma-api-key': apiKey(options),
       accept: 'application/json'
     }
   });
@@ -63,12 +68,12 @@ export async function lumaGet(path: string, params: Record<string, ParamValue> =
 export async function lumaPost(
   path: string,
   body: Json,
-  options: { dryRun?: boolean; confirmed?: boolean } = {}
+  options: { dryRun?: boolean; confirmed?: boolean; writesEnabled?: boolean; apiKey?: string } = {}
 ) {
-  if (options.dryRun || !options.confirmed || !lumaWritesEnabled()) {
+  if (options.dryRun || !options.confirmed || !options.writesEnabled) {
     return {
       dryRun: true,
-      writesEnabled: lumaWritesEnabled(),
+      writesEnabled: options.writesEnabled === true,
       path,
       body
     };
@@ -77,7 +82,7 @@ export async function lumaPost(
   const response = await fetch(new URL(path, LUMA_BASE_URL), {
     method: 'POST',
     headers: {
-      'x-luma-api-key': apiKey(),
+      'x-luma-api-key': apiKey(options),
       'content-type': 'application/json',
       accept: 'application/json'
     },
@@ -85,6 +90,11 @@ export async function lumaPost(
   });
   const payload = await parseResponse(response);
   if (!response.ok) {
+    console.error('[luma:post:error]', {
+      path,
+      status: response.status,
+      payload
+    });
     throw new LumaError(`Luma POST ${path} failed`, response.status, payload);
   }
   return payload;
@@ -113,16 +123,20 @@ function nextCursor(payload: Json) {
   return String(payload.next_cursor ?? payload.nextCursor ?? payload.pagination_cursor ?? '');
 }
 
-async function paginated(path: string, params: Record<string, ParamValue>) {
+async function paginated(path: string, params: Record<string, ParamValue>, options: LumaOptions = {}) {
   const all: Json[] = [];
   let cursor = '';
 
   do {
-    const payload = await lumaGet(path, {
-      ...params,
-      pagination_limit: PAGE_LIMIT,
-      pagination_cursor: cursor || undefined
-    });
+    const payload = await lumaGet(
+      path,
+      {
+        ...params,
+        pagination_limit: PAGE_LIMIT,
+        pagination_cursor: cursor || undefined
+      },
+      options
+    );
     all.push(...entries(payload));
     cursor = nextCursor(payload);
     if (!hasMore(payload)) break;
@@ -144,20 +158,28 @@ function eventIdentity(entry: Json) {
   return String(event.id ?? event.event_id ?? event.api_id ?? event.event_api_id ?? JSON.stringify(entry));
 }
 
-export async function listCalendarEvents() {
+export async function listCalendarEvents(options: LumaOptions = {}) {
   const batches = await Promise.all([
-    paginated('/v1/calendar/list-events', {
-      sort_column: 'start_at',
-      sort_direction: 'desc',
-      platforms: ['luma', 'external'],
-      status: 'approved'
-    }),
-    paginated('/v1/calendar/list-events', {
-      sort_column: 'start_at',
-      sort_direction: 'desc',
-      platforms: ['luma', 'external'],
-      status: 'pending'
-    })
+    paginated(
+      '/v1/calendar/list-events',
+      {
+        sort_column: 'start_at',
+        sort_direction: 'desc',
+        platforms: ['luma', 'external'],
+        status: 'approved'
+      },
+      options
+    ),
+    paginated(
+      '/v1/calendar/list-events',
+      {
+        sort_column: 'start_at',
+        sort_direction: 'desc',
+        platforms: ['luma', 'external'],
+        status: 'pending'
+      },
+      options
+    )
   ]);
 
   const byId = new Map<string, Json>();
@@ -167,44 +189,67 @@ export async function listCalendarEvents() {
   return [...byId.values()];
 }
 
-export async function getEvent(eventId: string) {
-  return lumaGet('/v1/event/get', {
-    id: eventId
-  });
+export async function getCalendar(options: LumaOptions = {}) {
+  return lumaGet('/v1/calendar/get', {}, options);
 }
 
-export async function listEventGuests(eventId: string) {
-  return paginated('/v1/event/get-guests', {
-    event_id: eventId
-  });
+export async function getEvent(eventId: string, options: LumaOptions = {}) {
+  return lumaGet(
+    '/v1/event/get',
+    {
+      id: eventId
+    },
+    options
+  );
 }
 
-export async function getEventGuest(eventId: string, guestId: string) {
-  return lumaGet('/v1/event/get-guest', {
-    event_id: eventId,
-    id: guestId
-  });
+export async function listEventGuests(eventId: string, options: LumaOptions = {}) {
+  return paginated(
+    '/v1/event/get-guests',
+    {
+      event_id: eventId
+    },
+    options
+  );
+}
+
+export async function getEventGuest(eventId: string, guestId: string, options: LumaOptions = {}) {
+  return lumaGet(
+    '/v1/event/get-guest',
+    {
+      event_id: eventId,
+      id: guestId
+    },
+    options
+  );
 }
 
 export async function updateGuestStatus(params: {
   eventId: string;
   guestId: string;
-  approvalStatus: 'approved' | 'declined' | 'waitlist';
+  approvalStatus: 'approved' | 'declined';
   message?: string;
   dryRun?: boolean;
   confirmed?: boolean;
+  writesEnabled?: boolean;
+  apiKey?: string;
 }) {
   return lumaPost(
     '/v1/event/update-guest-status',
     {
+      guest: {
+        type: 'api_id',
+        api_id: params.guestId
+      },
       event_id: params.eventId,
-      guest_id: params.guestId,
-      approval_status: params.approvalStatus,
-      message: params.message || undefined
+      status: params.approvalStatus,
+      should_refund: false
     },
     {
       dryRun: params.dryRun,
-      confirmed: params.confirmed
+      confirmed: params.confirmed,
+      writesEnabled: params.writesEnabled,
+      apiKey: params.apiKey
     }
   );
 }

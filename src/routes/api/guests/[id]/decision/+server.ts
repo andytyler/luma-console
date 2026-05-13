@@ -1,5 +1,6 @@
 import { redirect, type RequestHandler } from '@sveltejs/kit';
 import { sql } from '$lib/server/db';
+import { requireGuestAccess } from '$lib/server/permissions';
 
 const statuses = new Set([
   'needs_review',
@@ -20,6 +21,7 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
   if (!guestId || !statuses.has(status)) {
     throw redirect(303, next);
   }
+  await requireGuestAccess(locals.user?.id, guestId);
 
   const [guest] = await sql<{ status_internal: string }[]>`
     select status_internal

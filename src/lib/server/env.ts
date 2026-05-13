@@ -73,14 +73,22 @@ export function adminEmails() {
     .filter(Boolean);
 }
 
-export function lumaWritesEnabled() {
-  return env('LUMA_WRITES_ENABLED', 'false').toLowerCase() === 'true';
-}
-
 export function lumaWebhookSecret() {
   return env('LUMA_WEBHOOK_SECRET');
 }
 
 export function lumaWebhookConfigured() {
   return Boolean(lumaWebhookSecret());
+}
+
+export function supabaseConfigured() {
+  return Boolean(env('PUBLIC_SUPABASE_URL') && env('PUBLIC_SUPABASE_PUBLISHABLE_KEY'));
+}
+
+export function appEncryptionKey() {
+  return env('APP_ENCRYPTION_KEY');
+}
+
+export function inviteEmailsEnabled() {
+  return env('INVITE_EMAILS_ENABLED', 'false').toLowerCase() === 'true';
 }

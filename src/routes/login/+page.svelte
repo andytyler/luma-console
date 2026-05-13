@@ -18,12 +18,30 @@
       <Card.Description>
         {#if data.setupMode}
           Use an email from ADMIN_EMAILS to bootstrap the private console.
+        {:else if data.supabaseConfigured}
+          Use Google or your email and password. Calendar access is checked per Luma calendar.
         {:else}
           Access is limited to invited reviewers.
         {/if}
       </Card.Description>
     </Card.Header>
     <Card.Content>
+      {#if data.supabaseConfigured}
+        <form method="POST" action="?/google">
+          <input type="hidden" name="next" value={data.next} />
+          <Button type="submit" class="w-full">Continue with Google</Button>
+        </form>
+        {#if form?.message}
+          <p class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {form.message}
+          </p>
+        {/if}
+        <div class="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+          <div class="h-px flex-1 bg-border"></div>
+          <span>Email password</span>
+          <div class="h-px flex-1 bg-border"></div>
+        </div>
+      {/if}
       {#if data.setupMode}
         <div class="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-sm">
           {#if configuredAdminEmails().length}

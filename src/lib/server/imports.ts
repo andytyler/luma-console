@@ -1,7 +1,7 @@
 import { jsonb, sql } from './db';
 import { getEvent, getEventGuest, listCalendarEvents, listEventGuests, unwrapEvent } from './luma';
 import { normalizeEvent, normalizeGuest } from './luma-normalize';
-import { enqueueScoreJobs } from './jobs';
+import { enqueueGithubJobsForGuests, enqueueScoreJobs } from './jobs';
 
 type Json = Record<string, unknown>;
 
@@ -23,13 +23,14 @@ function mergeEventPayload(listEntry: Json, detailResponse: Json) {
   };
 }
 
-export async function upsertEventFromRaw(raw: Json) {
+export async function upsertEventFromRaw(raw: Json, calendarId?: string) {
   const event = normalizeEvent(raw);
   if (!event) return null;
 
   const [savedEvent] = await sql<{ id: string }[]>`
     insert into events (
       luma_event_id,
+      calendar_id,
       api_id,
       name,
       url,
@@ -44,6 +45,7 @@ export async function upsertEventFromRaw(raw: Json) {
     )
     values (
       ${event.lumaEventId},
+      ${calendarId ?? null},
       ${event.apiId},
       ${event.name},
       ${event.url},
@@ -66,6 +68,7 @@ export async function upsertEventFromRaw(raw: Json) {
       timezone = excluded.timezone,
       status = excluded.status,
       raw_json = excluded.raw_json,
+      calendar_id = coalesce(excluded.calendar_id, events.calendar_id),
       last_synced_at = now(),
       updated_at = now()
     returning id::text
@@ -171,11 +174,11 @@ export async function refreshEventCounts(eventId: string) {
       waitlist_count = ${counts.waitlist_count},
       last_synced_at = now(),
       updated_at = now()
-    where id = ${eventId}
+    where events.id = ${eventId}
   `;
 }
 
-export async function syncEventsFromLuma() {
+export async function syncEventsFromLuma(options: { calendarId?: string; apiKey?: string } = {}) {
   const [run] = await sql<{ id: string }[]>`
     insert into luma_sync_runs (type)
     values ('events')
@@ -183,7 +186,7 @@ export async function syncEventsFromLuma() {
   `;
 
   try {
-    const rawEvents = await listCalendarEvents();
+    const rawEvents = await listCalendarEvents({ apiKey: options.apiKey });
     let imported = 0;
 
     for (const raw of rawEvents) {
@@ -192,7 +195,7 @@ export async function syncEventsFromLuma() {
 
       let eventRaw = raw;
       try {
-        const detail = await getEvent(listedEvent.lumaEventId);
+        const detail = await getEvent(listedEvent.lumaEventId, { apiKey: options.apiKey });
         eventRaw = mergeEventPayload(raw, detail);
       } catch (error) {
         eventRaw = {
@@ -204,7 +207,7 @@ export async function syncEventsFromLuma() {
         };
       }
 
-      const savedEvent = await upsertEventFromRaw(eventRaw);
+      const savedEvent = await upsertEventFromRaw(eventRaw, options.calendarId);
       if (savedEvent) imported += 1;
     }
 
@@ -226,10 +229,15 @@ export async function syncEventsFromLuma() {
 }
 
 export async function syncGuestsForEvent(eventId: string) {
-  const [event] = await sql<{ id: string; luma_event_id: string }[]>`
-    select id::text, luma_event_id
+  const [event] = await sql<{
+    id: string;
+    luma_event_id: string;
+    encrypted_api_key: string | null;
+  }[]>`
+    select events.id::text, events.luma_event_id, luma_calendars.encrypted_api_key
     from events
-    where id = ${eventId}
+    left join luma_calendars on luma_calendars.id = events.calendar_id
+    where events.id = ${eventId}
     limit 1
   `;
   if (!event) {
@@ -243,7 +251,9 @@ export async function syncGuestsForEvent(eventId: string) {
   `;
 
   try {
-    const rawGuests = await listEventGuests(event.luma_event_id);
+    const { decryptSecret } = await import('./crypto');
+    const apiKey = event.encrypted_api_key ? decryptSecret(event.encrypted_api_key) || undefined : undefined;
+    const rawGuests = await listEventGuests(event.luma_event_id, { apiKey });
     let imported = 0;
     const guestIds: string[] = [];
 
@@ -255,6 +265,7 @@ export async function syncGuestsForEvent(eventId: string) {
     }
 
     if (guestIds.length > 0) {
+      await enqueueGithubJobsForGuests(guestIds);
       await enqueueScoreJobs(guestIds);
     }
 
@@ -277,12 +288,18 @@ export async function syncGuestsForEvent(eventId: string) {
   }
 }
 
-export async function syncGuestForEventByLumaId(eventId: string, lumaEventId: string, guestId: string) {
-  const rawGuest = await getEventGuest(lumaEventId, guestId);
+export async function syncGuestForEventByLumaId(
+  eventId: string,
+  lumaEventId: string,
+  guestId: string,
+  apiKey?: string
+) {
+  const rawGuest = await getEventGuest(lumaEventId, guestId, { apiKey });
   const savedGuest = await upsertGuestRawForEvent(eventId, rawGuest);
   if (!savedGuest) return { imported: 0 };
 
   await enqueueScoreJobs([savedGuest.id]);
+  await enqueueGithubJobsForGuests([savedGuest.id]);
   await refreshEventCounts(eventId);
   return { imported: 1 };
 }

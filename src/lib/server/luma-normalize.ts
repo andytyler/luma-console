@@ -111,11 +111,137 @@ export function normalizeEvent(raw: Json) {
   };
 }
 
+export function normalizeCalendar(raw: Json) {
+  const calendar = ((raw.calendar as Json | undefined) ?? (raw.data as Json | undefined) ?? raw) as Json;
+  const id = firstText(
+    calendar.id,
+    calendar.calendar_id,
+    calendar.api_id,
+    calendar.calendar_api_id,
+    nested(calendar, 'calendar.id')
+  );
+
+  return {
+    lumaCalendarId: id,
+    name: firstText(calendar.name, calendar.title, nested(calendar, 'calendar.name')) ?? 'Luma Calendar',
+    slug: firstText(calendar.slug, calendar.handle, calendar.url_slug),
+    url: firstUrl(calendar.url, calendar.calendar_url, calendar.website, calendar.luma_url),
+    avatarUrl:
+      firstUrl(
+        calendar.avatar_url,
+        calendar.logo_url,
+        calendar.icon_url,
+        calendar.image_url,
+        nested(calendar, 'avatar.url'),
+        nested(calendar, 'logo.url'),
+        nested(calendar, 'image.url')
+      ) ?? findCoverUrl(calendar),
+    timezone: firstText(calendar.timezone, calendar.tz),
+    raw: calendar
+  };
+}
+
+function roleFromKey(key: string) {
+  const lower = key.toLowerCase();
+  if (lower.includes('owner') || lower.includes('admin') || lower.includes('manager')) return 'admin';
+  return 'reviewer';
+}
+
+function calendarPeopleFromValue(value: unknown, source: string, appRole: 'admin' | 'reviewer') {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => {
+      const person = typeof entry === 'object' && entry !== null ? (entry as Json) : {};
+      const email = firstText(
+        person.email,
+        nested(person, 'user.email'),
+        nested(person, 'person.email'),
+        nested(person, 'profile.email')
+      );
+      if (!email) return null;
+
+      return {
+        email: email.toLowerCase(),
+        name: firstText(person.name, nested(person, 'user.name'), nested(person, 'person.name')),
+        lumaRole: firstText(person.role, person.permission, person.type, source),
+        appRole,
+        avatarUrl: firstUrl(
+          person.avatar_url,
+          person.image_url,
+          nested(person, 'user.avatar_url'),
+          nested(person, 'profile.avatar_url')
+        ),
+        source,
+        raw: person
+      };
+    })
+    .filter(Boolean) as Array<{
+    email: string;
+    name: string | null;
+    lumaRole: string | null;
+    appRole: 'admin' | 'reviewer';
+    avatarUrl: string | null;
+    source: string;
+    raw: Json;
+  }>;
+}
+
+export function normalizeCalendarPeople(raw: Json) {
+  const calendar = ((raw.calendar as Json | undefined) ?? (raw.data as Json | undefined) ?? raw) as Json;
+  const candidates = [
+    ['admins', calendar.admins],
+    ['admin_users', calendar.admin_users],
+    ['managers', calendar.managers],
+    ['members', calendar.members],
+    ['team_members', calendar.team_members],
+    ['hosts', calendar.hosts],
+    ['calendar.admins', nested(calendar, 'calendar.admins')],
+    ['calendar.members', nested(calendar, 'calendar.members')]
+  ] as const;
+
+  const byEmail = new Map<string, ReturnType<typeof calendarPeopleFromValue>[number]>();
+  for (const [source, value] of candidates) {
+    const appRole = roleFromKey(source);
+    for (const person of calendarPeopleFromValue(value, source, appRole)) {
+      const previous = byEmail.get(person.email);
+      if (!previous || previous.appRole !== 'admin') {
+        byEmail.set(person.email, person);
+      }
+    }
+  }
+
+  return [...byEmail.values()];
+}
+
 function answerText(answer: unknown): string {
   if (answer === null || answer === undefined) return '';
   if (Array.isArray(answer)) return answer.map(answerText).filter(Boolean).join(', ');
+  if (typeof answer === 'string') {
+    const trimmed = answer.trim();
+    if (/^[{[]/.test(trimmed)) {
+      try {
+        return answerText(JSON.parse(trimmed));
+      } catch {
+        return answer;
+      }
+    }
+    return answer;
+  }
   if (typeof answer === 'object') {
     const object = answer as Json;
+    const company = firstText(
+      typeof object.company === 'object' && object.company !== null
+        ? (object.company as Json).name
+        : object.company,
+      object.company_name,
+      object.organization,
+      object.employer
+    );
+    const title = firstText(object.job_title, object.title, object.role, object.position, object.headline);
+    if (company && title) return `${title} at ${company}`;
+    if (title) return title;
+    if (company) return company;
     return (
       firstText(object.answer, object.value, object.label, object.text, object.name) ??
       JSON.stringify(answer)

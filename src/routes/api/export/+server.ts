@@ -1,9 +1,11 @@
 import { type RequestHandler } from '@sveltejs/kit';
 import { sql } from '$lib/server/db';
 import { toCsv } from '$lib/server/csv';
+import { requireEventAccess } from '$lib/server/permissions';
 
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, locals }) => {
   const eventId = url.searchParams.get('event_id') ?? '';
+  await requireEventAccess(locals.user?.id, eventId);
   const rows = await sql<{
     name: string | null;
     email: string;

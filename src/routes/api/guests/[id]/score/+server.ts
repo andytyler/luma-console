@@ -1,8 +1,9 @@
 import { redirect, type RequestHandler } from '@sveltejs/kit';
 import { sql } from '$lib/server/db';
 import { scoreGuest } from '$lib/server/scoring';
+import { requireGuestAccess } from '$lib/server/permissions';
 
-export const POST: RequestHandler = async ({ params, request }) => {
+export const POST: RequestHandler = async ({ params, request, locals }) => {
   const guestId = params.id;
   const form = await request.formData();
   const next = String(form.get('next') ?? '/events');
@@ -11,6 +12,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!guestId) {
     throw redirect(303, next);
   }
+  await requireGuestAccess(locals.user?.id, guestId, 'admin');
 
   if (mode === 'manual') {
     const score = Math.max(0, Math.min(100, Number(form.get('score') ?? 0)));

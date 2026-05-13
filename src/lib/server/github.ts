@@ -83,7 +83,26 @@ export async function fetchGithubProfile(username: string) {
             avatarUrl
             url
             followers { totalCount }
-            repositories(ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount }
+            repositories(
+              first: 100
+              ownerAffiliations: OWNER
+              privacy: PUBLIC
+              orderBy: { field: STARGAZERS, direction: DESC }
+            ) {
+              totalCount
+              nodes {
+                name
+                nameWithOwner
+                url
+                description
+                stargazerCount
+                forkCount
+                primaryLanguage {
+                  name
+                  color
+                }
+              }
+            }
             contributionsCollection {
               contributionCalendar {
                 totalContributions
@@ -116,6 +135,24 @@ export async function fetchGithubProfile(username: string) {
 
   const calendar = ((user.contributionsCollection as Json).contributionCalendar as Json) ?? {};
   const weeks = (calendar.weeks as Json[]) ?? [];
+  const repositories = (user.repositories as Json | undefined) ?? {};
+  const repositoryNodes = Array.isArray(repositories.nodes) ? (repositories.nodes as Json[]) : [];
+  const totalStars = repositoryNodes.reduce(
+    (total, repository) => total + Number(repository.stargazerCount ?? 0),
+    0
+  );
+  const topRepositories = repositoryNodes.slice(0, 3).map((repository) => {
+    const language = repository.primaryLanguage as Json | null | undefined;
+    return {
+      name: String(repository.nameWithOwner ?? repository.name ?? ''),
+      url: String(repository.url ?? ''),
+      description: repository.description ? String(repository.description) : null,
+      stars: Number(repository.stargazerCount ?? 0),
+      forks: Number(repository.forkCount ?? 0),
+      language: language?.name ? String(language.name) : null,
+      languageColor: language?.color ? String(language.color) : null
+    };
+  });
 
   return {
     username: String(user.login),
@@ -123,7 +160,9 @@ export async function fetchGithubProfile(username: string) {
     avatarUrl: String(user.avatarUrl),
     contributionTotal: Number(calendar.totalContributions ?? 0),
     followers: Number((user.followers as Json | undefined)?.totalCount ?? 0),
-    publicRepos: Number((user.repositories as Json | undefined)?.totalCount ?? 0),
+    publicRepos: Number(repositories.totalCount ?? 0),
+    totalStars,
+    topRepositories,
     currentStreak: currentStreak(weeks),
     weeks,
     raw: user
@@ -147,6 +186,8 @@ export async function enrichGithub(guestId: string) {
       contribution_total,
       followers,
       public_repos,
+      total_stars,
+      top_repositories,
       current_streak,
       weeks,
       raw_json,
@@ -160,6 +201,8 @@ export async function enrichGithub(guestId: string) {
       ${profile.contributionTotal},
       ${profile.followers},
       ${profile.publicRepos},
+      ${profile.totalStars},
+      ${jsonb(profile.topRepositories)},
       ${profile.currentStreak},
       ${jsonb(profile.weeks)},
       ${jsonb(profile.raw)},
@@ -172,6 +215,8 @@ export async function enrichGithub(guestId: string) {
       contribution_total = excluded.contribution_total,
       followers = excluded.followers,
       public_repos = excluded.public_repos,
+      total_stars = excluded.total_stars,
+      top_repositories = excluded.top_repositories,
       current_streak = excluded.current_streak,
       weeks = excluded.weeks,
       raw_json = excluded.raw_json,

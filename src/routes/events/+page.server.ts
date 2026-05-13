@@ -3,9 +3,21 @@ import { syncEventsFromLuma, syncGuestsForEvent } from '$lib/server/imports';
 import { lumaConfigured } from '$lib/server/luma';
 import { sql } from '$lib/server/db';
 import { lumaWebhookConfigured } from '$lib/server/env';
+import { calendarApiKey, defaultCalendar, userCalendars } from '$lib/server/calendars';
+import { requireCalendarAccess } from '$lib/server/permissions';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ locals, url }) => {
+  const calendars = locals.user ? await userCalendars(locals.user.id) : [];
+  const selectedCalendarId =
+    url.searchParams.get('calendar_id') ?? calendars[0]?.id ?? (await defaultCalendar(locals.user?.id ?? ''))?.id;
+
+  if (selectedCalendarId && locals.user) {
+    await requireCalendarAccess(locals.user.id, selectedCalendarId);
+  }
+
+  const calendarFilter = selectedCalendarId ? sql`and events.calendar_id = ${selectedCalendarId}` : sql``;
+
   const [events, syncRuns, webhookDeliveries] = await Promise.all([
     sql<{
       id: string;
@@ -41,6 +53,8 @@ export const load: PageServerLoad = async () => {
         last_synced_at::text,
         raw_json
       from events
+      where true
+        ${calendarFilter}
       order by start_at desc nulls last
     `,
     sql<{
@@ -79,30 +93,49 @@ export const load: PageServerLoad = async () => {
 
   return {
     events,
+    calendars,
+    selectedCalendarId,
     syncRuns,
     webhookDeliveries,
     lumaWebhookConfigured: lumaWebhookConfigured(),
-    lumaConfigured: lumaConfigured()
+    lumaConfigured: Boolean(selectedCalendarId) || lumaConfigured()
   };
 };
 
 export const actions: Actions = {
-  sync: async () => {
-    if (!lumaConfigured()) {
+  sync: async ({ locals, request }) => {
+    const form = await request.formData();
+    const calendarId = String(form.get('calendar_id') ?? '');
+    if (!locals.user || !calendarId) {
+      return fail(400, { message: 'Choose a calendar before syncing events.' });
+    }
+    await requireCalendarAccess(locals.user.id, calendarId, 'admin');
+    const apiKey = await calendarApiKey(calendarId);
+
+    if (!apiKey && !lumaConfigured()) {
       return fail(400, { message: 'Set LUMA_API_KEY before syncing events.' });
     }
-    const result = await syncEventsFromLuma();
+    const result = await syncEventsFromLuma({ calendarId, apiKey: apiKey || undefined });
     return { message: `Imported ${result.imported} events.` };
   },
-  syncAllGuests: async () => {
-    if (!lumaConfigured()) {
+  syncAllGuests: async ({ locals, request }) => {
+    const form = await request.formData();
+    const calendarId = String(form.get('calendar_id') ?? '');
+    if (!locals.user || !calendarId) {
+      return fail(400, { message: 'Choose a calendar before syncing guests.' });
+    }
+    await requireCalendarAccess(locals.user.id, calendarId, 'admin');
+    const apiKey = await calendarApiKey(calendarId);
+
+    if (!apiKey && !lumaConfigured()) {
       return fail(400, { message: 'Set LUMA_API_KEY before syncing guests.' });
     }
 
-    await syncEventsFromLuma();
+    await syncEventsFromLuma({ calendarId, apiKey: apiKey || undefined });
     const events = await sql<{ id: string; name: string }[]>`
       select id::text, name
       from events
+      where calendar_id = ${calendarId}
       order by start_at desc nulls last
     `;
 
